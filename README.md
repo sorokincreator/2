@@ -1,1 +1,316 @@
-# 2
+import telebot
+from config import API_KEY
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+admin_chat_id = '1807821919'
+bot = telebot.TeleBot(API_KEY)
+
+# Счётчик заявок
+application_counter = 0
+
+# Словари с переводами
+translations = {
+    'ru': {
+        'help_text': "\n/start - запуск бота\n/help - доступные команды\n/about - информация о боте",
+        'about_text': "Программист и разработчик, СОРОКИН А.С. сделал этого бота. Техническая поддержка по номеру: 89831254221.",
+        'choose_language': "Выберите язык:",
+        'welcome': "Здравствуйте! Я помогу создать заявку на ремонт принтера.",
+        'choose_manufacturer': "Выберите производителя принтера:",
+        'invalid_manufacturer': "Пожалуйста, выберите производителя из предложенных вариантов.",
+        'describe_problem': "Опишите проблему с принтером:",
+        'enter_phone': "Введите ваш номер телефона (11 цифр):",
+        'invalid_phone': "Неверный формат номера. Пожалуйста, введите 11 цифр:",
+        'attach_photo': "Прикрепите фотографию или нажмите кнопку 'Пропустить':",
+        'skip': "Пропустить",
+        'invalid_photo': "Пожалуйста, отправьте фото или нажмите 'Пропустить'.",
+        'enter_address': "Введите адрес (Улица и Дом):",
+        'application_created': "Заявка №{} создана и отправлена. Вам перезвонят в ближайшее время. Спасибо!",
+        'start_help': "Пожалуйста, начните с команды /start",
+        'cancel': "Отмена"
+    },
+    'en': {
+        'help_text': "\n/start - start the bot\n/help - available commands\n/about - bot information",
+        'about_text': "Programmer and developer, SOROKIN A.S. made this bot. Technical support by phone: 89831254221.",
+        'choose_language': "Choose language:",
+        'welcome': "Hello! I will help you create a printer repair request.",
+        'choose_manufacturer': "Choose printer manufacturer:",
+        'invalid_manufacturer': "Please choose a manufacturer from the suggested options.",
+        'describe_problem': "Describe the problem with the printer:",
+        'enter_phone': "Enter your phone number (11 digits):",
+        'invalid_phone': "Invalid phone format. Please enter 11 digits:",
+        'attach_photo': "Attach a photo or click 'Skip':",
+        'skip': "Skip",
+        'invalid_photo': "Please send a photo or click 'Skip'.",
+        'enter_address': "Enter address (Street and House):",
+        'application_created': "Request №{} created and sent. We will call you back soon. Thank you!",
+        'start_help': "Please start with /start command",
+        'cancel': "Cancel"
+    }
+}
+
+# Производители принтеров
+manufacturers = ["HP", "Canon", "Epson", "Brother", "Samsung", "Lexmark",
+                 "Xerox", "Ricoh", "Dell", "Kodak", "Pantum"]
+
+# Хранение данных пользователей
+user_data = {}
+user_languages = {}
+
+
+@bot.message_handler(commands=["help"])
+def help_command(message):
+    user_language = get_user_language(message.chat.id)
+    bot.send_message(message.chat.id, text=translations[user_language]['help_text'])
+
+
+@bot.message_handler(commands=["about"])
+def about(message):
+    user_language = get_user_language(message.chat.id)
+    bot.send_message(message.chat.id, translations[user_language]['about_text'])
+
+
+def get_user_language(chat_id):
+    return user_languages.get(chat_id, 'ru')
+
+
+def set_user_language(chat_id, language):
+    user_languages[chat_id] = language
+
+
+def language_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton('🇷🇺 Русский', callback_data='lang_ru'),
+        InlineKeyboardButton('🇺🇸 English', callback_data='lang_en')
+    )
+    return markup
+
+
+def manufacturers_keyboard():
+    markup = InlineKeyboardMarkup()
+    # Создаем кнопки по 2 в строке
+    buttons = []
+    for manufacturer in manufacturers:
+        buttons.append(InlineKeyboardButton(manufacturer, callback_data=f'manufacturer_{manufacturer}'))
+
+    # Группируем по 2 кнопки в строке
+    for i in range(0, len(buttons), 2):
+        if i + 1 < len(buttons):
+            markup.row(buttons[i], buttons[i + 1])
+        else:
+            markup.row(buttons[i])
+
+    # Добавляем кнопку отмены
+    markup.row(InlineKeyboardButton("❌ Отмена / Cancel", callback_data='cancel'))
+    return markup
+
+
+def skip_photo_keyboard(language):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton(translations[language]['skip'], callback_data='skip_photo'))
+    markup.row(InlineKeyboardButton("❌ " + translations[language]['cancel'], callback_data='cancel'))
+    return markup
+
+
+def cancel_keyboard(language):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("❌ " + translations[language]['cancel'], callback_data='cancel'))
+    return markup
+
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.send_message(message.chat.id,
+                     translations['ru']['choose_language'],
+                     reply_markup=language_keyboard())
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+
+    if call.data.startswith('lang_'):
+        # Обработка выбора языка
+        language = call.data.split('_')[1]
+        set_user_language(chat_id, language)
+        user_language = get_user_language(chat_id)
+
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=translations[user_language]['choose_language'] + "\n✅ " + (
+                "Выбран русский" if language == 'ru' else "Selected English")
+        )
+
+        # Запускаем создание заявки
+        start_application(chat_id, user_language)
+
+    elif call.data.startswith('manufacturer_'):
+        # Обработка выбора производителя
+        manufacturer = call.data.split('_', 1)[1]
+        user_language = get_user_language(chat_id)
+
+        if chat_id not in user_data:
+            user_data[chat_id] = {}
+
+        user_data[chat_id]['manufacturer'] = manufacturer
+
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=f"✅ {translations[user_language]['choose_manufacturer']}\n{manufacturer}"
+        )
+
+        # Запрашиваем описание проблемы
+        bot.send_message(chat_id, translations[user_language]['describe_problem'],
+                         reply_markup=cancel_keyboard(user_language))
+        bot.register_next_step_handler(call.message, get_problem_description)
+
+    elif call.data == 'skip_photo':
+        # Пропуск фото
+        user_language = get_user_language(chat_id)
+        user_data[chat_id]['photo'] = None
+
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=translations[user_language]['attach_photo'] + "\n✅ " + translations[user_language]['skip']
+        )
+
+        # Запрашиваем адрес
+        ask_address(call.message)
+
+    elif call.data == 'cancel':
+        # Отмена операции
+        user_language = get_user_language(chat_id)
+        if chat_id in user_data:
+            del user_data[chat_id]
+
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text="❌ " + ("Операция отменена" if user_language == 'ru' else "Operation cancelled")
+        )
+
+
+def start_application(chat_id, user_language):
+    global application_counter
+    application_counter += 1
+    current_number = application_counter
+
+    if chat_id not in user_data:
+        user_data[chat_id] = {}
+
+    user_data[chat_id]['application_number'] = current_number
+
+    welcome_text = translations[user_language]['welcome']
+    choose_manufacturer_text = translations[user_language]['choose_manufacturer']
+
+    bot.send_message(chat_id,
+                     f"{welcome_text}\n{choose_manufacturer_text}",
+                     reply_markup=manufacturers_keyboard())
+
+
+def get_problem_description(message):
+    user_language = get_user_language(message.chat.id)
+    description = message.text.strip()
+
+    if message.chat.id not in user_data:
+        user_data[message.chat.id] = {}
+
+    user_data[message.chat.id]['description'] = description
+
+    bot.send_message(message.chat.id, translations[user_language]['enter_phone'],
+                     reply_markup=cancel_keyboard(user_language))
+    bot.register_next_step_handler(message, get_phone_number)
+
+
+def get_phone_number(message):
+    user_language = get_user_language(message.chat.id)
+    phone = message.text.strip()
+
+    if not (phone.isdigit() and len(phone) == 11):
+        bot.send_message(message.chat.id, translations[user_language]['invalid_phone'],
+                         reply_markup=cancel_keyboard(user_language))
+        bot.register_next_step_handler(message, get_phone_number)
+        return
+
+    user_data[message.chat.id]['phone'] = phone
+
+    bot.send_message(message.chat.id,
+                     translations[user_language]['attach_photo'],
+                     reply_markup=skip_photo_keyboard(user_language))
+    bot.register_next_step_handler(message, get_photo)
+
+
+def get_photo(message):
+    user_language = get_user_language(message.chat.id)
+
+    if message.photo:
+        # Пользователь отправил фото
+        photo_file_id = message.photo[-1].file_id
+        user_data[message.chat.id]['photo'] = photo_file_id
+
+        bot.send_message(message.chat.id, "✅ " + ("Фото получено" if user_language == 'ru' else "Photo received"))
+        ask_address(message)
+    else:
+        # Если не фото, показываем кнопку пропуска
+        bot.send_message(message.chat.id, translations[user_language]['invalid_photo'],
+                         reply_markup=skip_photo_keyboard(user_language))
+        bot.register_next_step_handler(message, get_photo)
+
+
+def ask_address(message):
+    user_language = get_user_language(message.chat.id)
+    bot.send_message(message.chat.id, translations[user_language]['enter_address'],
+                     reply_markup=cancel_keyboard(user_language))
+    bot.register_next_step_handler(message, get_address)
+
+
+def get_address(message):
+    user_language = get_user_language(message.chat.id)
+    address = message.text.strip()
+
+    if not isinstance(address, str):
+        address = str(address)
+
+    user_data[message.chat.id]['address'] = address
+
+    # Собираем всю информацию
+    data = user_data[message.chat.id]
+
+    # Формируем отчет для администратора
+    report = f"Заявка №{data['application_number']}:\n" \
+             f"Производитель: {data['manufacturer']}\n" \
+             f"Проблема: {data['description']}\n" \
+             f"Телефон: {data['phone']}\n" \
+             f"Адрес: {data['address']}\n" \
+             f"Язык: {'Русский' if user_language == 'ru' else 'Английский'}"
+
+    # Отправляем заявку администратору
+    bot.send_message(int(admin_chat_id), report)
+    if data.get('photo'):
+        bot.send_photo(chat_id=int(admin_chat_id), photo=data['photo'])
+
+    # Подтверждение пользователю
+    bot.send_message(message.chat.id,
+                     translations[user_language]['application_created'].format(data['application_number']))
+
+    # Очищаем данные пользователя
+    if message.chat.id in user_data:
+        del user_data[message.chat.id]
+
+
+@bot.message_handler(func=lambda message: True)
+def handle_unknown(message):
+    user_language = get_user_language(message.chat.id)
+    bot.send_message(message.chat.id, translations[user_language]['start_help'])
+
+
+if __name__ == "__main__":
+    print("Бот запускается...")
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        print(f"Ошибка: {e}")
