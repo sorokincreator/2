@@ -5,10 +5,8 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 admin_chat_id = '1807821919'
 bot = telebot.TeleBot(API_KEY)
 
-# Счётчик заявок
 application_counter = 0
 
-# Словари с переводами
 translations = {
     'ru': {
         'help_text': "\n/start - запуск бота\n/help - доступные команды\n/about - информация о боте",
@@ -26,9 +24,7 @@ translations = {
         'enter_address': "Введите адрес (Улица и Дом):",
         'application_created': "Заявка №{} создана и отправлена. Вам перезвонят в ближайшее время. Спасибо!",
         'start_help': "Пожалуйста, начните с команды /start",
-        'cancel': "Отмена",
-        'cancelled': "Операция отменена",
-        'create_new': "Создать новую заявку"
+        'cancel': "Отмена"
     },
     'en': {
         'help_text': "\n/start - start the bot\n/help - available commands\n/about - bot information",
@@ -46,17 +42,13 @@ translations = {
         'enter_address': "Enter address (Street and House):",
         'application_created': "Request №{} created and sent. We will call you back soon. Thank you!",
         'start_help': "Please start with /start command",
-        'cancel': "Cancel",
-        'cancelled': "Operation cancelled",
-        'create_new': "Create new request"
+        'cancel': "Cancel"
     }
 }
 
-# Производители принтеров
 manufacturers = ["HP", "Canon", "Epson", "Brother", "Samsung", "Lexmark",
                  "Xerox", "Ricoh", "Dell", "Kodak", "Pantum"]
 
-# Хранение данных пользователей
 user_data = {}
 user_languages = {}
 
@@ -92,19 +84,16 @@ def language_keyboard():
 
 def manufacturers_keyboard():
     markup = InlineKeyboardMarkup()
-    # Создаем кнопки по 2 в строке
     buttons = []
     for manufacturer in manufacturers:
         buttons.append(InlineKeyboardButton(manufacturer, callback_data=f'manufacturer_{manufacturer}'))
 
-    # Группируем по 2 кнопки в строке
     for i in range(0, len(buttons), 2):
         if i + 1 < len(buttons):
             markup.row(buttons[i], buttons[i + 1])
         else:
             markup.row(buttons[i])
 
-    # Добавляем кнопку отмены
     markup.row(InlineKeyboardButton("❌ Отмена / Cancel", callback_data='cancel'))
     return markup
 
@@ -112,12 +101,6 @@ def manufacturers_keyboard():
 def cancel_keyboard(language):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("❌ " + translations[language]['cancel'], callback_data='cancel'))
-    return markup
-
-
-def start_again_keyboard(language):
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🔄 " + translations[language]['create_new'] + " 🔄 " , callback_data='start_again'))
     return markup
 
 
@@ -134,7 +117,6 @@ def handle_callback(call):
     message_id = call.message.message_id
 
     if call.data.startswith('lang_'):
-        # Обработка выбора языка
         language = call.data.split('_')[1]
         set_user_language(chat_id, language)
         user_language = get_user_language(chat_id)
@@ -146,11 +128,9 @@ def handle_callback(call):
                 "Выбран русский" if language == 'ru' else "Selected English")
         )
 
-        # Запускаем создание заявки
         start_application(chat_id, user_language)
 
     elif call.data.startswith('manufacturer_'):
-        # Обработка выбора производителя
         manufacturer = call.data.split('_', 1)[1]
         user_language = get_user_language(chat_id)
 
@@ -165,32 +145,20 @@ def handle_callback(call):
             text=f"✅ {translations[user_language]['choose_manufacturer']}\n{manufacturer}"
         )
 
-        # Запрашиваем описание проблемы
         bot.send_message(chat_id, translations[user_language]['describe_problem'],
                          reply_markup=cancel_keyboard(user_language))
         bot.register_next_step_handler(call.message, get_problem_description)
 
     elif call.data == 'cancel':
-        # Отмена операции
         user_language = get_user_language(chat_id)
         if chat_id in user_data:
             del user_data[chat_id]
 
-
-        # Предлагаем создать новую заявку
-        bot.send_message(chat_id,
-                         "❌ " + translations[user_language]['cancelled'] + ":",
-                         reply_markup=start_again_keyboard(user_language))
-
-    elif call.data == 'start_again':
-        # Создание новой заявки после отмены
-        user_language = get_user_language(chat_id)
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text="🔄 " + translations[user_language]['create_new']
+            text="❌ " + ("Операция отменена" if user_language == 'ru' else "Operation cancelled")
         )
-        start_application(chat_id, user_language)
 
 
 def start_application(chat_id, user_language):
@@ -246,16 +214,13 @@ def get_phone_number(message):
 def get_photo(message):
     user_language = get_user_language(message.chat.id)
 
-    # Проверяем, является ли сообщение фото
     if message.photo:
-        # Пользователь отправил фото
         photo_file_id = message.photo[-1].file_id
         user_data[message.chat.id]['photo'] = photo_file_id
 
         bot.send_message(message.chat.id, "✅ " + ("Фото получено" if user_language == 'ru' else "Photo received"))
         ask_address(message)
     else:
-        # Если это не фото, показываем сообщение об ошибке
         bot.send_message(message.chat.id, translations[user_language]['invalid_photo'],
                          reply_markup=cancel_keyboard(user_language))
         bot.register_next_step_handler(message, get_photo)
@@ -277,10 +242,8 @@ def get_address(message):
 
     user_data[message.chat.id]['address'] = address
 
-    # Собираем всю информацию
     data = user_data[message.chat.id]
 
-    # Формируем отчет для администратора
     report = f"Заявка №{data['application_number']}:\n" \
              f"Производитель: {data['manufacturer']}\n" \
              f"Проблема: {data['description']}\n" \
@@ -288,16 +251,13 @@ def get_address(message):
              f"Адрес: {data['address']}\n" \
              f"Язык: {'Русский' if user_language == 'ru' else 'Английский'}"
 
-    # Отправляем заявку администратору
     bot.send_message(int(admin_chat_id), report)
     if data.get('photo'):
         bot.send_photo(chat_id=int(admin_chat_id), photo=data['photo'])
 
-    # Подтверждение пользователю
     bot.send_message(message.chat.id,
                      translations[user_language]['application_created'].format(data['application_number']))
 
-    # Очищаем данные пользователя
     if message.chat.id in user_data:
         del user_data[message.chat.id]
 
@@ -306,7 +266,6 @@ def get_address(message):
 def handle_unknown(message):
     user_language = get_user_language(message.chat.id)
     bot.send_message(message.chat.id, translations[user_language]['start_help'])
-
 
 if __name__ == "__main__":
     print("Бот запускается...")
