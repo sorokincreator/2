@@ -20,13 +20,15 @@ translations = {
         'describe_problem': "Опишите проблему с принтером:",
         'enter_phone': "Введите ваш номер телефона (11 цифр):",
         'invalid_phone': "Неверный формат номера. Пожалуйста, введите 11 цифр:",
-        'attach_photo': "Прикрепите фотографию или нажмите кнопку 'Пропустить':",
+        'attach_photo': "Прикрепите фотографию принтера (обязательно):",
         'skip': "Пропустить",
-        'invalid_photo': "Пожалуйста, отправьте фото или нажмите 'Пропустить'.",
+        'invalid_photo': "Пожалуйста, отправьте фото.",
         'enter_address': "Введите адрес (Улица и Дом):",
         'application_created': "Заявка №{} создана и отправлена. Вам перезвонят в ближайшее время. Спасибо!",
         'start_help': "Пожалуйста, начните с команды /start",
-        'cancel': "Отмена"
+        'cancel': "Отмена",
+        'cancelled': "Операция отменена",
+        'create_new': "Создать новую заявку"
     },
     'en': {
         'help_text': "\n/start - start the bot\n/help - available commands\n/about - bot information",
@@ -38,13 +40,15 @@ translations = {
         'describe_problem': "Describe the problem with the printer:",
         'enter_phone': "Enter your phone number (11 digits):",
         'invalid_phone': "Invalid phone format. Please enter 11 digits:",
-        'attach_photo': "Attach a photo or click 'Skip':",
+        'attach_photo': "Attach a photo of the printer:",
         'skip': "Skip",
-        'invalid_photo': "Please send a photo or click 'Skip'.",
+        'invalid_photo': "Please send a photo.",
         'enter_address': "Enter address (Street and House):",
         'application_created': "Request №{} created and sent. We will call you back soon. Thank you!",
         'start_help': "Please start with /start command",
-        'cancel': "Cancel"
+        'cancel': "Cancel",
+        'cancelled': "Operation cancelled",
+        'create_new': "Create new request"
     }
 }
 
@@ -105,16 +109,15 @@ def manufacturers_keyboard():
     return markup
 
 
-def skip_photo_keyboard(language):
+def cancel_keyboard(language):
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton(translations[language]['skip'], callback_data='skip_photo'))
     markup.row(InlineKeyboardButton("❌ " + translations[language]['cancel'], callback_data='cancel'))
     return markup
 
 
-def cancel_keyboard(language):
+def start_again_keyboard(language):
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("❌ " + translations[language]['cancel'], callback_data='cancel'))
+    markup.row(InlineKeyboardButton("🔄 " + translations[language]['create_new'] + " 🔄 " , callback_data='start_again'))
     return markup
 
 
@@ -167,31 +170,27 @@ def handle_callback(call):
                          reply_markup=cancel_keyboard(user_language))
         bot.register_next_step_handler(call.message, get_problem_description)
 
-    elif call.data == 'skip_photo':
-        # Пропуск фото
-        user_language = get_user_language(chat_id)
-        user_data[chat_id]['photo'] = None
-
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=translations[user_language]['attach_photo'] + "\n✅ " + translations[user_language]['skip']
-        )
-
-        # Запрашиваем адрес
-        ask_address(call.message)
-
     elif call.data == 'cancel':
         # Отмена операции
         user_language = get_user_language(chat_id)
         if chat_id in user_data:
             del user_data[chat_id]
 
+
+        # Предлагаем создать новую заявку
+        bot.send_message(chat_id,
+                         "❌ " + translations[user_language]['cancelled'] + ":",
+                         reply_markup=start_again_keyboard(user_language))
+
+    elif call.data == 'start_again':
+        # Создание новой заявки после отмены
+        user_language = get_user_language(chat_id)
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text="❌ " + ("Операция отменена" if user_language == 'ru' else "Operation cancelled")
+            text="🔄 " + translations[user_language]['create_new']
         )
+        start_application(chat_id, user_language)
 
 
 def start_application(chat_id, user_language):
@@ -240,13 +239,14 @@ def get_phone_number(message):
 
     bot.send_message(message.chat.id,
                      translations[user_language]['attach_photo'],
-                     reply_markup=skip_photo_keyboard(user_language))
+                     reply_markup=cancel_keyboard(user_language))
     bot.register_next_step_handler(message, get_photo)
 
 
 def get_photo(message):
     user_language = get_user_language(message.chat.id)
 
+    # Проверяем, является ли сообщение фото
     if message.photo:
         # Пользователь отправил фото
         photo_file_id = message.photo[-1].file_id
@@ -255,9 +255,9 @@ def get_photo(message):
         bot.send_message(message.chat.id, "✅ " + ("Фото получено" if user_language == 'ru' else "Photo received"))
         ask_address(message)
     else:
-        # Если не фото, показываем кнопку пропуска
+        # Если это не фото, показываем сообщение об ошибке
         bot.send_message(message.chat.id, translations[user_language]['invalid_photo'],
-                         reply_markup=skip_photo_keyboard(user_language))
+                         reply_markup=cancel_keyboard(user_language))
         bot.register_next_step_handler(message, get_photo)
 
 
