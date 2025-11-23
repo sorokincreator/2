@@ -24,7 +24,8 @@ translations = {
         'enter_address': "Введите адрес (Улица и Дом):",
         'application_created': "Заявка №{} создана и отправлена. Вам перезвонят в ближайшее время. Спасибо!",
         'start_help': "Пожалуйста, начните с команды /start",
-        'cancel': "Отмена"
+        'cancel': "Отмена",
+        'cancelled': "Заявка отменена. Начинаем новую заявку..."
     },
     'en': {
         'help_text': "\n/start - start the bot\n/help - available commands\n/about - bot information",
@@ -42,7 +43,8 @@ translations = {
         'enter_address': "Enter address (Street and House):",
         'application_created': "Request №{} created and sent. We will call you back soon. Thank you!",
         'start_help': "Please start with /start command",
-        'cancel': "Cancel"
+        'cancel': "Cancel",
+        'cancelled': "Application cancelled. Starting new application..."
     }
 }
 
@@ -51,6 +53,8 @@ manufacturers = ["HP", "Canon", "Epson", "Brother", "Samsung", "Lexmark",
 
 user_data = {}
 user_languages = {}
+# Словарь для отслеживания текущих шагов пользователей
+user_current_step = {}
 
 
 @bot.message_handler(commands=["help"])
@@ -106,6 +110,10 @@ def cancel_keyboard(language):
 
 @bot.message_handler(commands=['start'])
 def start(message):
+    # Очищаем текущий шаг при новом старте
+    if message.chat.id in user_current_step:
+        del user_current_step[message.chat.id]
+
     bot.send_message(message.chat.id,
                      translations['ru']['choose_language'],
                      reply_markup=language_keyboard())
@@ -138,6 +146,7 @@ def handle_callback(call):
             user_data[chat_id] = {}
 
         user_data[chat_id]['manufacturer'] = manufacturer
+        user_current_step[chat_id] = 'describe_problem'
 
         bot.edit_message_text(
             chat_id=chat_id,
@@ -151,14 +160,21 @@ def handle_callback(call):
 
     elif call.data == 'cancel':
         user_language = get_user_language(chat_id)
+
+        # Очищаем данные текущей заявки и текущий шаг
         if chat_id in user_data:
             del user_data[chat_id]
+        if chat_id in user_current_step:
+            del user_current_step[chat_id]
 
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text="❌ " + ("Операция отменена" if user_language == 'ru' else "Operation cancelled")
+            text="❌ " + translations[user_language]['cancelled']
         )
+
+        # Сразу начинаем новую заявку
+        start_application(chat_id, user_language)
 
 
 def start_application(chat_id, user_language):
@@ -170,6 +186,7 @@ def start_application(chat_id, user_language):
         user_data[chat_id] = {}
 
     user_data[chat_id]['application_number'] = current_number
+    user_current_step[chat_id] = 'choose_manufacturer'
 
     welcome_text = translations[user_language]['welcome']
     choose_manufacturer_text = translations[user_language]['choose_manufacturer']
@@ -180,6 +197,10 @@ def start_application(chat_id, user_language):
 
 
 def get_problem_description(message):
+    # Проверяем, не отменена ли заявка
+    if message.chat.id not in user_current_step or user_current_step.get(message.chat.id) != 'describe_problem':
+        return
+
     user_language = get_user_language(message.chat.id)
     description = message.text.strip()
 
@@ -187,6 +208,7 @@ def get_problem_description(message):
         user_data[message.chat.id] = {}
 
     user_data[message.chat.id]['description'] = description
+    user_current_step[message.chat.id] = 'enter_phone'
 
     bot.send_message(message.chat.id, translations[user_language]['enter_phone'],
                      reply_markup=cancel_keyboard(user_language))
@@ -194,6 +216,10 @@ def get_problem_description(message):
 
 
 def get_phone_number(message):
+    # Проверяем, не отменена ли заявка
+    if message.chat.id not in user_current_step or user_current_step.get(message.chat.id) != 'enter_phone':
+        return
+
     user_language = get_user_language(message.chat.id)
     phone = message.text.strip()
 
@@ -204,6 +230,7 @@ def get_phone_number(message):
         return
 
     user_data[message.chat.id]['phone'] = phone
+    user_current_step[message.chat.id] = 'attach_photo'
 
     bot.send_message(message.chat.id,
                      translations[user_language]['attach_photo'],
@@ -212,11 +239,16 @@ def get_phone_number(message):
 
 
 def get_photo(message):
+    # Проверяем, не отменена ли заявка
+    if message.chat.id not in user_current_step or user_current_step.get(message.chat.id) != 'attach_photo':
+        return
+
     user_language = get_user_language(message.chat.id)
 
     if message.photo:
         photo_file_id = message.photo[-1].file_id
         user_data[message.chat.id]['photo'] = photo_file_id
+        user_current_step[message.chat.id] = 'enter_address'
 
         bot.send_message(message.chat.id, "✅ " + ("Фото получено" if user_language == 'ru' else "Photo received"))
         ask_address(message)
@@ -228,12 +260,18 @@ def get_photo(message):
 
 def ask_address(message):
     user_language = get_user_language(message.chat.id)
+    user_current_step[message.chat.id] = 'enter_address'
+
     bot.send_message(message.chat.id, translations[user_language]['enter_address'],
                      reply_markup=cancel_keyboard(user_language))
     bot.register_next_step_handler(message, get_address)
 
 
 def get_address(message):
+    # Проверяем, не отменена ли заявка
+    if message.chat.id not in user_current_step or user_current_step.get(message.chat.id) != 'enter_address':
+        return
+
     user_language = get_user_language(message.chat.id)
     address = message.text.strip()
 
@@ -258,14 +296,18 @@ def get_address(message):
     bot.send_message(message.chat.id,
                      translations[user_language]['application_created'].format(data['application_number']))
 
+    # Очищаем данные после успешного завершения
     if message.chat.id in user_data:
         del user_data[message.chat.id]
+    if message.chat.id in user_current_step:
+        del user_current_step[message.chat.id]
 
 
 @bot.message_handler(func=lambda message: True)
 def handle_unknown(message):
     user_language = get_user_language(message.chat.id)
     bot.send_message(message.chat.id, translations[user_language]['start_help'])
+
 
 if __name__ == "__main__":
     print("Бот запускается...")
