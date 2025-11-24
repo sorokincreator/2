@@ -109,7 +109,6 @@ def cancel_keyboard(language):
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    # Очищаем текущий шаг при новом старте
     if message.chat.id in user_current_step:
         del user_current_step[message.chat.id]
 
@@ -195,7 +194,6 @@ def start_application(chat_id, user_language):
 
 
 def get_problem_description(message):
-    # Проверяем, не отменена ли заявка
     if message.chat.id not in user_current_step or user_current_step.get(message.chat.id) != 'describe_problem':
         return
 
